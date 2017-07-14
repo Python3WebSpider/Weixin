@@ -1,5 +1,5 @@
 from http.client import RemoteDisconnected
-
+from requests import Request, Session
 from django.contrib.sites import requests
 from weixin.config import *
 from weixin.db import RedisQueue
@@ -10,9 +10,12 @@ from urllib.parse import urlencode
 from urllib.error import URLError
 import requests
 from pyquery import PyQuery as pq
+from requests import ReadTimeout, ConnectionError
 
 
 class Spider():
+    
+    
     base_url = 'http://weixin.sogou.com/weixin'
     keyword = 'NBA'
     headers = {
@@ -26,7 +29,7 @@ class Spider():
         'Upgrade-Insecure-Requests': '1',
         'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_12_3) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/59.0.3071.115 Safari/537.36'
     }
-    
+    session = Session()
     queue = RedisQueue()
     mysql = MySQL()
     
@@ -42,26 +45,24 @@ class Spider():
     
     def start(self):
         start_url = self.base_url + '?' + urlencode({'query': self.keyword, 'type': 2})
-        weixin_request = WeixinRequest(Request(url=start_url), callback=self.parse_index, need_proxy=True)
+        weixin_request = WeixinRequest(url=start_url, callback=self.parse_index, need_proxy=True)
         self.queue.add(weixin_request)
     
     def parse_index(self, response):
-        html = response.read().decode('utf-8')
-        print(html)
-        doc = pq(html)
+        doc = pq(response.text)
+        print(doc)
         items = doc('.news-box .news-list li .txt-box h3 a').items()
         for item in items:
             url = item.attr('href')
-            weixin_request = WeixinRequest(Request(url=url), callback=self.parse_detail)
+            weixin_request = WeixinRequest(url=url, callback=self.parse_detail)
             yield weixin_request
         next = doc('#sogou_next').attr('href')
-        url = self.base_url + str(next)
-        weixin_request = WeixinRequest(Request(url=url), callback=self.parse_index, need_proxy=True)
+        url = self.base_url + next
+        weixin_request = WeixinRequest(url=url, callback=self.parse_index, need_proxy=True)
         yield weixin_request
     
     def parse_detail(self, response):
-        html = response.read().decode('utf-8')
-        doc = pq(html)
+        doc = pq(response.text)
         data = {
             'title': doc('.rich_media_title').text(),
             'content': doc('.rich_media_content').text(),
@@ -76,14 +77,14 @@ class Spider():
             if weixin_request.need_proxy:
                 proxy = self.get_proxy()
                 if proxy:
-                    proxy_handler = ProxyHandler({
+                    proxies = {
                         'http': 'http://' + proxy,
                         'https': 'https://' + proxy
-                    })
-                    opener = build_opener(proxy_handler)
-                    return opener.open(weixin_request.request, timeout=weixin_request.timeout)
-            return urlopen(weixin_request.request, timeout=weixin_request.timeout)
-        except (URLError, RemoteDisconnected, ConnectionResetError) as e:
+                    }
+                    return self.session.send(weixin_request.prepare(),
+                                             timeout=weixin_request.timeout, allow_redirects=False, proxies=proxies)
+            return self.session.send(weixin_request.prepare(), timeout=weixin_request.timeout, allow_redirects=False)
+        except (ConnectionError, ReadTimeout) as e:
             print(e.args)
             return False
     
@@ -91,10 +92,9 @@ class Spider():
         while not self.queue.empty():
             weixin_request = self.queue.pop()
             callback = weixin_request.callback
-            print('Schedule', weixin_request.request.full_url, weixin_request.callback)
+            print('Schedule', weixin_request.url)
             response = self.request(weixin_request)
-            print('Status', response.status, response.url) if response else 'Error'
-            if response and response.status == 200:
+            if response and response.status_code in VALID_STATUSES:
                 results = callback(response)
                 for result in results:
                     print('New Result', result)
@@ -103,9 +103,10 @@ class Spider():
                     if isinstance(result, dict):
                         self.mysql.insert('articles', result)
             else:
-                print('Request Failed, Rescheduled')
                 weixin_request.fail_time = weixin_request.fail_time + 1
-                self.queue.add(weixin_request)
+                print('Request Failed', weixin_request.fail_time, 'Times', weixin_request.url)
+                if weixin_request.fail_time < MAX_FAILED_TIME:
+                    self.queue.add(weixin_request)
     
     def run(self):
         self.start()
