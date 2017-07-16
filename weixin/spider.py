@@ -132,7 +132,7 @@ class Spider():
                 results = list(callback(response))
                 if results:
                     for result in results:
-                        print('New Result', result)
+                        print('New Result', type(result))
                         if isinstance(result, WeixinRequest):
                             self.queue.add(result)
                         if isinstance(result, dict):
