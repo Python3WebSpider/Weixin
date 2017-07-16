@@ -10,7 +10,7 @@ class RedisQueue():
         初始化Redis
         """
         self.db = StrictRedis(host=REDIS_HOST, port=REDIS_PORT, password=REDIS_PASSWORD)
-    
+
     def add(self, request):
         """
         向队列添加序列化后的Request
@@ -21,7 +21,7 @@ class RedisQueue():
         if isinstance(request, WeixinRequest):
             return self.db.rpush(REDIS_KEY, dumps(request))
         return False
-    
+
     def pop(self):
         """
         取出下一个Request并反序列化
@@ -31,11 +31,10 @@ class RedisQueue():
             return loads(self.db.lpop(REDIS_KEY))
         else:
             return False
-    
+
     def clear(self):
-        while not self.empty():
-            self.db.lpop()
-    
+        self.db.delete(REDIS_KEY)
+
     def empty(self):
         return self.db.llen(REDIS_KEY) == 0
 

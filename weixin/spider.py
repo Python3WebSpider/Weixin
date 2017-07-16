@@ -1,5 +1,4 @@
 from requests import Session
-from django.contrib.sites import requests
 from weixin.config import *
 from weixin.db import RedisQueue
 from weixin.mysql import MySQL
@@ -119,7 +118,7 @@ class Spider():
         if weixin_request.fail_time < MAX_FAILED_TIME:
             self.queue.add(weixin_request)
     
-    def process(self):
+    def schedule(self):
         """
         调度请求
         :return:
@@ -149,7 +148,7 @@ class Spider():
         :return:
         """
         self.start()
-        self.process()
+        self.schedule()
 
 
 if __name__ == '__main__':
