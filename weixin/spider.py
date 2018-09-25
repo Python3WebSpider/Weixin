@@ -1,3 +1,4 @@
+import re
 from requests import Session
 from weixin.config import *
 from weixin.db import RedisQueue
@@ -77,10 +78,12 @@ class Spider():
         :return: 微信公众号文章
         """
         doc = pq(response.text)
+        # 页面的时间是通过 JS 加载的，使用正则直接从 JS 获取日期
+        dt_string = re.search(r'publish_time = "(.*?)"', response.text).group(1)
         data = {
             'title': doc('.rich_media_title').text(),
             'content': doc('.rich_media_content').text(),
-            'date': doc('#post-date').text(),
+            'date': dt_string,
             'nickname': doc('#js_profile_qrcode > div > strong').text(),
             'wechat': doc('#js_profile_qrcode > div > p:nth-child(3) > span').text()
         }
@@ -101,8 +104,8 @@ class Spider():
                         'https': 'https://' + proxy
                     }
                     return self.session.send(weixin_request.prepare(),
-                                             timeout=weixin_request.timeout, allow_redirects=False, proxies=proxies)
-            return self.session.send(weixin_request.prepare(), timeout=weixin_request.timeout, allow_redirects=False)
+                                             timeout=weixin_request.timeout, proxies=proxies)
+            return self.session.send(weixin_request.prepare(), timeout=weixin_request.timeout)
         except (ConnectionError, ReadTimeout) as e:
             print(e.args)
             return False
